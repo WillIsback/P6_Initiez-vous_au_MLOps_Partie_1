@@ -1,0 +1,21 @@
+[project]
+name = "p6-initiez-vous-au-mlops-partie-1"
+version = "0.1.0"
+description = "Élaborez un modèle de scoring"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "matplotlib>=3.11.2",
+    "mlflow>=3.17.2",
+    "numpy>=2.4.6",
+    "pandas>=3.1.0",
+    "ruff>=0.17.2",
+    "scikit-learn>=1.9.1",
+]
+
+[dependency-groups]
+dev = [
+    "ipykernel>=7.4.0",
+    "jupyterlab>=4.6.4",
+    "mlflow[extras]>=3.17.2",
+]
