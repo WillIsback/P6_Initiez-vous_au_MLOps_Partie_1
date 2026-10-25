@@ -8,3 +8,16 @@ wheels/
 
 # Virtual environments
 .venv
+mlflow.db
+mlflow-artifacts/
+mlruns/
+.env
+.ipynb_checkpoints/
+
+# Outils
+.ruff_cache/
+*.log
+
+# Donnees (3 Go : brut Kaggle + prepares) — voir data/README.md pour les reconstituer
+data/*
+!data/README.md
