@@ -6,6 +6,9 @@ EDA → préparation → baselines (LogReg / LightGBM) → feature engineering a
 → MLflow Model Registry → serving pyfunc → app Gradio d'inférence :
 
 - Notebook : [`notebooks/p6_ml.ipynb`](notebooks/p6_ml.ipynb)
+- Consulter le notebook exécuté sans le relancer (~80 min) :
+  - export HTML statique (sorties et graphiques inclus) : [`docs/p6_ml.html`](docs/p6_ml.html) — à télécharger puis ouvrir dans un navigateur, ou [aperçu en ligne](https://html-preview.github.io/?url=https://github.com/WillIsback/P6_Initiez-vous_au_MLOps_Partie_1/blob/main/docs/p6_ml.html)
+  - rendu via [nbviewer](https://nbviewer.org/github/WillIsback/P6_Initiez-vous_au_MLOps_Partie_1/blob/main/notebooks/p6_ml.ipynb)
 - Documentation détaillée (choix + application, en français) : [`docs/`](docs/README.md)
 
 ## Installation
