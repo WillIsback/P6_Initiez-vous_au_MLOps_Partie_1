@@ -11,6 +11,7 @@ Chaque document explicite **les choix méthodologiques**, **leur application con
 |---|-------|----------|--------|
 | 0 | Environnement de dev & dimensionnement (DAT) | [00](00_environnement_et_dimensionnement.md) | ✅ |
 | 1 | Exploration des données (EDA) | [01](01_exploration_des_donnees.md) | ✅ |
+| 1b | Tables secondaires : agrégats & jointures | [01b](01b_tables_secondaires.md) | ✅ |
 | 2 | Préparation des données | [02](02_preparation_des_donnees.md) | ✅ |
 | 3 | Modélisation — baselines (LogReg & LightGBM) | [03](03_modellisation_baseline.md) | ✅ |
 | 4 | Feature engineering automatisé (OpenFE) | [04](04_feature_engineering.md) | ✅ |
@@ -21,11 +22,13 @@ Chaque document explicite **les choix méthodologiques**, **leur application con
 
 ## Artefacts principaux
 
-- **Notebook** : [`notebooks/p6_ml.ipynb`](../notebooks/p6_ml.ipynb) — pipeline complet, sections 1 à 11.
+- **Notebook** : [`notebooks/p6_ml.ipynb`](../notebooks/p6_ml.ipynb) — pipeline complet, sections 1 à 12 (export HTML : [`p6_ml.html`](p6_ml.html)).
+- **Captures MLflow** : [`img/`](img/) — liste des runs, comparaison, run tuné, artefact coût/seuil, Model Registry, runs d'inférence.
 - **Données traitées** : `data/processed/` — snapshots `*_prepared.csv` (base), `*_fe.csv` (features OpenFE),
   `*_fs.csv` (features sélectionnées), `preprocessing_bundle.joblib`.
 - **Tracking** : MLflow (experiment `home-credit-scoring`) — runs, métriques métier, artifacts (ROC, coût/seuil),
-  Model Registry (`home-credit-logreg`, `home-credit-lightgbm`).
+  Model Registry (`home-credit-logreg`, `home-credit-lightgbm`, `home-credit-serving`). Les runs du
+  pipeline actuel portent le tag `data_scope = application+6_tables_secondaires`.
 - **Feature selection** : `data/processed/feature_selection_boruta.csv` — décision par feature
   (`confirmed` / `rejected` / `tentative_kept` / `removed_variance`).
 
@@ -39,4 +42,6 @@ Toutes les décisions de pipeline (seuil, sélection, tuning) sont guidées par 
 
 - `application_train.csv` : 307 511 demandes, 122 colonnes, cible `TARGET` (8,07 % de défauts).
 - `application_test.csv` : 48 744 demandes — **jamais utilisé** avant l'évaluation finale (set inviolé).
+- 6 tables secondaires (bureau, bureau_balance, previous_application, installments_payments,
+  POS_CASH_balance, credit_card_balance) : 57 M lignes d'historique, agrégées au grain client.
 - Source : Home Credit Default Risk (Kaggle), chargée via `data/home-credit-default-risk.zip`.

@@ -1,4 +1,4 @@
-# Données (ignorées par git — ~3 Go)
+# Données (ignorées par git — ~7 Go)
 
 Ce dossier **n'est pas versionné** (3 Go de CSV). Il se reconstitue intégralement
 avec le pipeline du projet :
@@ -7,13 +7,15 @@ avec le pipeline du projet :
 |---|---|---|
 | `raw/home-credit-default-risk.zip` | téléchargé automatiquement par la **cellule 2 du notebook** (URL OpenClassrooms S3) | ~690 MB |
 | `raw/application_train.csv`, `raw/application_test.csv`, `raw/HomeCredit_columns_description.csv` | extraction sélective (cellule 3 du notebook) | ~200 Mo |
-| `processed/*_prepared.csv`, `*_fe.csv`, `*_fs.csv`, `preprocessing_bundle.joblib`, `openfe_bank*.joblib/json`, `feature_selection_boruta.csv` | sections 6, 10 et 11 du notebook | ~2,1 Go (dont 1,4 Go pour `train_fe.csv`) |
-| `inference/clients.db`, `inference/features.json` | `scripts/build_inference_db.py` | 26 Mo |
+| `raw/bureau.csv`, `bureau_balance.csv`, `previous_application.csv`, `installments_payments.csv`, `POS_CASH_balance.csv`, `credit_card_balance.csv` | extraction (cellule 3) — tables secondaires | ~2,5 Go |
+| `processed/secondary_aggregates.parquet` | section 5bis (agrégats des tables secondaires) | ~100 Mo |
+| `processed/*_prepared.csv`, `*_fe.csv`, `*_fs.csv`, `preprocessing_bundle.joblib`, `openfe_bank*.joblib/json`, `feature_selection_boruta.csv` | sections 6, 10 et 11 du notebook | ~3,3 Go |
+| `inference/clients.db`, `inference/features.json` | `scripts/build_inference_db.py` | 51 Mo |
 
 ## Reconstitution depuis un clone vierge
 
 1. `uv sync` (Python 3.11)
-2. Ouvrir `notebooks/p6_ml.ipynb` et faire un **Run All** (~1 h 20, voir la
+2. Ouvrir `notebooks/p6_ml.ipynb` et faire un **Run All** (~1 h, voir la
    section « Temps d'exécution » du README racine) — le zip est téléchargé et
    extrait automatiquement, tous les fichiers `processed/` sont régénérés
 3. Pour la phase inférence (optionnel) :

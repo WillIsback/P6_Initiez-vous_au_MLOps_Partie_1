@@ -1,75 +1,75 @@
 # 06 — Tuning modèle & hyperparamètres
 
-Notebook : `p6_ml.ipynb`, section 12 *(exécuté le 24/10/2026)*.
+Notebook : `p6_ml.ipynb`, section 12 *(exécuté le 02/11/2026 — version avec tables secondaires
+et pondération LightGBM)*.
 
-## Plan arrêté (appliqué tel quel)
+## Plan appliqué
 
-0. **✅ Décision tranchée : tuning sur le jeu sélectionné `train_fs.csv` / `val_fs.csv` (61 features)**
-   — et non sur les 400 features d'OpenFE. Justification (principe de simplicité) : à performance
-   quasi équivalente (AUC 0,7647 vs 0,7656 ; coût 0,5229 vs 0,5187), le modèle plus simple est
-   supérieur sur **tous** les coûts d'exploitation : entretien, interprétabilité (contexte
-   réglementaire crédit), latence d'inférence, budget d'entraînement (~5× plus rapide par fold →
-   budget Optuna plus large) et **surface de dérive** (moins de features à surveiller en
-   production). Le léger écart de coût (+0,0042/client) est le prix assumé de cette simplicité.
-1. **Optuna** (TPE sampler) pour optimiser les hyperparamètres LightGBM :
-   `learning_rate`, `num_leaves`, `min_child_samples`, `subsample`, `colsample_bytree`,
-   `max_depth`, `n_estimators` (borne haute + early stopping).
+0. **Jeu de features : `train_fs.csv` / `val_fs.csv` (122 features Boruta)** — et non les 603
+   features OpenFE. AUC proche (0,7866 vs 0,7895), modèle 5× plus compact : entretien,
+   interprétabilité (contexte réglementaire crédit), latence d'inférence, budget d'entraînement
+   et **surface de dérive** (moins de features à surveiller). Prix de ce choix sur le holdout :
+   +0,010/client avant tuning (cf. doc 05).
+1. **Optuna** (TPE sampler, `seed=42`) sur les hyperparamètres LightGBM : `learning_rate`,
+   `num_leaves`, `max_depth`, `min_child_samples`, `subsample`, `colsample_bytree`,
+   `reg_alpha`, `reg_lambda` (log-espaces où pertinent) ; `n_estimators` = 3 000 + early stopping.
 2. **Objectif** : **minimiser le coût métier moyen en CV 5-fold** (chaque fold ré-optimise son
    seuil sur le fold d'entraînement, mesure sur le fold de validation — aucune fuite).
-3. **Jeu de features** : `train_fs.csv` / `val_fs.csv` (**61 features Boruta détendu** — cf. point 0).
-4. **Budget CPU** : ~25 essais Optuna bornés, `n_jobs=8` par fit, pruners
-   (`MedianPruner`) sur les fits intermédiaires.
-5. **Artefacts** : study Optuna + run MLflow `tuning_optuna` (meilleurs params, coût CV),
-   puis ré-entraînement final du meilleur modèle enregistré au **Model Registry**
-   (`home-credit-lightgbm` v3) avec signature + seuil optimal figé.
-6. **Évaluation finale** : une seule fois sur `application_test.csv` (toujours inviolé à ce stade).
+3. **Pondération** : `class_weight='balanced'` dans chaque essai ; early stopping sur la logloss
+   **pondérée** (`eval_class_weight=['balanced']`, cf. doc 03).
+4. **Budget CPU** : 25 essais × 5 fits, `n_jobs=8` par fit, early stopping 50 par fold.
+5. **Artefacts** : run MLflow `tuning_optuna` (params, coût CV, historique d'optimisation,
+   importances des hyperparamètres), modèle final au **Model Registry**.
+6. **Évaluation finale** : une seule fois sur `application_test.csv` (toujours inviolé).
 
-## Résultats (mesurés, rejeu du 24/10/2026)
+## Résultats (mesurés, rejeu du 02/11/2026)
 
-**Étude Optuna** : TPE sampler, 25 essais × 5-fold CV, **43,5 min** (2 611 s),
-`n_jobs=8` par fit, early stopping 50 par fold, seuil ré-optimisé par fold
-(coût métier moyen = objectif). Run MLflow `tuning_optuna` :
-`2bab0b5ba06f435fa50be2de9c12ca72`.
+**Étude Optuna** : 25 essais × 5-fold CV, **27,3 min** (1 641 s). Run MLflow `tuning_optuna` :
+`63e372ca58df4f09b38758c21f9dcf9e`.
 
-| | Coût CV (objectif) | AUC CV | AUC validation | PR-AUC | Coût/validation | Seuil optimal |
+| | Coût CV (objectif) | AUC CV | AUC validation | PR-AUC | Coût validation | Seuil optimal |
 |---|---|---|---|---|---|---|
-| **Tuned (essai 18)** | **0.5211** | 0.7638 ± 0.0015 | **0.7662** | 0.2579 | **0.5220** | **0.0856** |
-| Untuned (réf. 61 feat.) | 0.5229 | 0.7647 | 0.7647 | — | 0.5229 | 0.0888 |
+| **Tuned** | **0,4899** | 0,7861 ± 0,0024 | **0,7893** | 0,2887 | **0,4814** | **0,5348** |
+| Non tuné (mêmes 122 features) | — | — | 0,7866 | 0,2844 | 0,4962 | 0,4881 |
+| *Version précédente (application seule, 61 features, non pondéré)* | *0,5211* | *0,7638* | *0,7662* | *0,2579* | *0,5220* | *0,0856* |
 
-Gain : **−0.0009 / client** sur la validation (et AUC +0.0015) malgré un espace de
-recherche volontairement étroit — le modèle 61 features était déjà proche de son
-plafond, ce qui **confirme le choix de simplicité** (l'écart résiduel avec le
-400 features OpenFE non tuné, 0.5187, tombe à +0.0033/client).
+Gain : **−0,0148/client** vs le modèle non tuné, et **−0,0406/client (−7,8 %)** vs le modèle
+final de la version précédente. C'est le meilleur coût de tout le pipeline (il bat aussi les 603
+features OpenFE non tunées, 0,4861).
 
-**Meilleurs hyperparamètres** (essai 18) :
+**Meilleurs hyperparamètres** :
 
 ```
-learning_rate     = 0.0107      subsample        = 0.783
-num_leaves        = 54          colsample_bytree = 0.957
-max_depth         = 4           reg_alpha        = 0.0157
-min_child_samples = 166         reg_lambda       = 0.948
-best iteration (fit final)      = 2 525
+learning_rate     = 0.0169      subsample        = 0.777
+num_leaves        = 28          colsample_bytree = 0.625
+max_depth         = 3           reg_alpha        = 9.21
+min_child_samples = 34          reg_lambda       = 0.035
+class_weight      = balanced
+best iteration (fit final)      = 2 983 / 3 000
 ```
 
-Lecture : arbres **peu profonds (4)** et très régularisés (`min_child_samples=166`,
-lr faible 0,0107, 2 525 itérations) — cohérent avec un jeu réduit de 61 features
-déjà fortes : le modèle préfère l'average de nombreux arbres faibles à des arbres
-complexes, limitant le surapprentissage sur les combos redondantes.
+Lecture : arbres **très peu profonds (3)**, `learning_rate` faible et **forte régularisation L1**
+(`reg_alpha` ≈ 9,2) — le modèle préfère beaucoup d'arbres faibles et parcimonieux, ce qui limite
+le surapprentissage sur les combos OpenFE redondants. **Point d'attention** : 2 983 itérations
+sur 3 000 — la borne `n_estimators` est presque atteinte ; la relever (5 000) est une piste
+d'amélioration simple.
 
-**Convergence** : la courbe de l'étude stagne après l'essai 18 (essais 19-24 sans
-gain) → le budget de 25 essais était suffisant ; TPE a épuisé l'espace utile.
+**Seuil métier** : 0,5348 — très proche du seuil théorique ≈ 0,535 attendu pour un score
+pondéré `balanced` (odds × 11,4) avec FN = 10 × FP. La pondération décale le score, le seuil
+optimisé l'absorbe : la **décision** reste celle qui minimise le coût métier.
 
-**Registry** : le modèle final est enregistré dans `home-credit-lightgbm` —
-**version 6** (les versions 3-5 ont été consommées par les re-exécutions des
-sections 9-11 ; l'impression « v3 » affichée par le notebook est un libellé codé
-en dur). Signature + input example logués ; le script
-`scripts/build_serving_model.py` résout dynamiquement la dernière version.
+**Registry** : `home-credit-lightgbm` **v9** (signature + input example + description). Le
+script `scripts/build_serving_model.py` résout dynamiquement la dernière version et produit
+`home-credit-serving` **v2** (seuil figé 0,5348).
 
-**Seuil métier** : 0.0856 — à nouveau très proche du seuil bayésien théorique
-1/(1+10) ≈ 0,091 (régime FN = 10 × FP), ce qui valide la cohérence de
-l'optimisation.
+## Captures MLflow
+
+- Liste des runs du pipeline (tag `data_scope`) : [`img/mlflow_01_runs_pipeline.png`](img/mlflow_01_runs_pipeline.png)
+- Comparaison des runs (coût, AUC, seuil) : [`img/mlflow_02_comparaison_runs.png`](img/mlflow_02_comparaison_runs.png)
+- Détail du run `tuning_optuna` : [`img/mlflow_03_run_tuning_optuna.png`](img/mlflow_03_run_tuning_optuna.png)
+- Model Registry : [`img/mlflow_05_model_registry.png`](img/mlflow_05_model_registry.png)
 
 ## Étape suivante
 
-Évaluation finale sur `application_test.csv` (toujours inviolé à ce stade), puis
-serving (`docs/07`) et app Gradio (`docs/08`).
+Évaluation finale sur `application_test.csv` (toujours inviolé à ce stade), puis serving
+(`docs/07`) et app Gradio (`docs/08`).

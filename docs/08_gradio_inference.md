@@ -33,15 +33,15 @@ implementer sur ce fichier. (Réintroduction possible plus tard en mode « audit
            ▼                                    ▼
 ┌───────────────────────┐        ┌──────────────────────────────┐
 │  data/inference/      │        │  MLflow Registry             │
-│  clients.db (SQLite)  │        │  home-credit-serving v1      │
-│  48 744 × 61 features │        │  (build : scripts/)          │
+│  clients.db (SQLite)  │        │  home-credit-serving v2      │
+│  48 744 × 122 features│        │  (build : scripts/)          │
 └───────────────────────┘        └──────────────┬───────────────┘
            ▲                                    │ 1 run par prédiction
            │ construit par                      ▼
 ┌───────────────────────┐        ┌──────────────────────────────┐
 │ build_inference_db.py │        │  MLflow :5000                │
-│ bundle → OpenFE →     │        │  runs tag stage=prod_inference│
-│ Boruta (rejeu figé)   │        └──────────────────────────────┘
+│ agrégats → bundle →   │        │  runs tag stage=prod_inference│
+│ OpenFE → Boruta       │        └──────────────────────────────┘
 └───────────────────────┘
 ```
 
@@ -59,21 +59,23 @@ Le cahier des charges demandait « le meilleur et le plus élégant par défaut 
 
 Le script `build_inference_db.py` rejoue **exactement** la chaîne du notebook :
 
+0. **Agrégats des tables secondaires** (section 5bis) : même module
+   `scripts/secondary_tables.py` que le notebook, jointure gauche sur `SK_ID_CURR`
+   (cache `secondary_aggregates.parquet`) ;
 1. **Bundle de préparation** (section 6) : sentinelle `DAYS_EMPLOYED` → NaN, `DAYS_*`
    → années, colonnes supprimées, winsorisation aux bornes train, imputation
    médiane/mode — le tout figé par `preprocessing_bundle.joblib` ;
-2. **Banc OpenFE** (section 10) : la recherche est **régénérée avec les mêmes
-   graines** (5 000 lignes, `seed=42`, candidats restreints) puis **mise en cache**
-   (`openfe_bank.joblib` + formules JSON lisibles) — pas de rejeu inutile au prochain
-   build ;
+2. **Banc OpenFE** (section 10) : le banc est **figé par le notebook**
+   (`openfe_bank.joblib` + formules JSON lisibles) et rejoué tel quel ; option
+   `--refresh-bank` pour le régénérer avec les mêmes graines ;
 3. **Vérifications intégrées** (échec = arrêt, jamais de base empoisonnée) :
    - préparation répliquée comparée à `train/val_prepared.csv` (≥ 99,9 % de cellules
      conformes, tolérance round-trip CSV) ;
-   - banc OpenFE comparé aux snapshots `train/val_fe.csv` (les 290 colonnes autoFE
-     doivent se reproduire à l'identique) ;
-4. **Sélection Boruta** : les 61 features confirmées (`feature_selection_boruta.csv`)
+   - banc OpenFE comparé aux snapshots `train/val_fe.csv` (les 382 colonnes autoFE
+     doivent se reproduire à l'identique — **100 % mesuré**) ;
+4. **Sélection Boruta** : les 122 features confirmées (`feature_selection_boruta.csv`)
    sont extraites ; toute absence = arrêt explicite ;
-5. **Écriture SQLite** : `clients(SK_ID_CURR INTEGER PRIMARY KEY, …61 features…)`,
+5. **Écriture SQLite** : `clients(SK_ID_CURR INTEGER PRIMARY KEY, …122 features…)`,
    catégorielles brutes en TEXT, numériques en REAL, NULL = valeur absente
    (LightGBM gère nativement les NaN résiduels des features autoFE).
 
@@ -97,9 +99,10 @@ par l'endpoint REST, jamais par un chargement local du modèle.
 Le volet SHAP reconstruit la décision du modèle, feature par feature :
 - **waterfall** des 8 principales contributions (log-odds) ;
 - les features `autoFE_f_i` opaques sont **retraduites par leur formule lisible**
-  (fichiers `openfe_bank_formulas.json`, ex. `autoFE_f_91 = (AMT_CREDIT/AMT_ANNUITY)`) ;
-- lecture métier : coût attendu selon la règle **FN = 10 × FP**, comparaison au seuil
-  bayésien théorique 1/11 ≈ 9,1 %.
+  (fichiers `openfe_bank_formulas.json`, ex. `autoFE_f_1 = (AMT_ANNUITY/AMT_CREDIT)`) ;
+- lecture métier : coût attendu selon la règle **FN = 10 × FP** ; le score affiché est
+  celui du modèle **pondéré** (`class_weight='balanced'`, non calibré) — d'où un seuil
+  métier ≈ 53 % et non ≈ 9 %.
 
 ## Lancement (3 process)
 
@@ -107,15 +110,16 @@ Le volet SHAP reconstruit la décision du modèle, feature par feature :
 # 1) serveur MLflow (si absent)
 ./scripts/serve_mlflow.sh
 # 2) serving du modèle (wrapper pyfunc)
-mlflow models serve -m 'models:/home-credit-serving/1' -p 5001 --env-manager local
+PATH="$PWD/.venv/bin:$PATH" mlflow models serve -m 'models:/home-credit-serving/2' -p 5001 --env-manager local
 # 3) app Gradio
 .venv/bin/python apps/gradio_app.py          # http://<host>:7860
 # test headless de la chaîne complète :
 .venv/bin/python apps/gradio_app.py --selftest
 ```
 
-La construction de la base (une fois, ~5 min au premier build dont 240 s de
-recherche OpenFE, ~1 min ensuite grâce au cache du banc) :
+L'app charge par défaut `models:/home-credit-serving/latest` (surcharge possible via la
+variable `SERVING_MODEL_URI`). Construction de la base (**30 s mesurées**, banc OpenFE figé
+par le notebook, agrégats en cache) :
 `.venv/bin/python scripts/build_inference_db.py`
 
 ## DAT — dimensionnement (règle permanente)
@@ -126,11 +130,11 @@ Hôte de dev (fiche `00_environnement_et_dimensionnement.md`) : AMD Ryzen 7 5700
 | Étape | CPU | RAM pic | Durée mesurée |
 |---|---|---|---|
 | `build_inference_db.py` (1er build, recherche OpenFE incluse) | 8 threads (OpenFE) | ~7 Go | **~5 min** (recherche 240 s + 44 s) |
-| `build_inference_db.py` (rejeu, banc en cache) | 8 threads | **6,8 Go mesuré** (`/usr/bin/time -v` : 7 138 836 Ko) | **44-66 s mesuré** |
+| `build_inference_db.py` (rejeu, banc en cache) | 8 threads | ~7 Go | **30 s mesuré** (02/11, 122 features, vérifications incluses) |
 | App Gradio — navigation (SELECT SQLite) | 1 thread | ~0,3 Go (lecture seule) | **~0,0 ms/ sélection** (mesuré) |
-| App Gradio — prédiction (HTTP serving) | 1 thread | ~0,5 Go (modèle chargé) | **16-25 ms** (1er appel 102 ms, selftest 3 clients) |
+| App Gradio — prédiction (HTTP serving) | 1 thread | ~0,5 Go (modèle chargé) | **22-23 ms** (1er appel 113 ms, selftest 3 clients) |
 | App Gradio — décryptage SHAP (waterfall inclus) | 1 thread | + ~0,3 Go (TreeExplainer) | **120 ms/client** (mesuré sur 20 clients) |
-| Transformation OpenFE (290 features, 307k lignes) | 8 threads | — | **~4 s** en mémoire (le coût du notebook venait de l'écriture CSV) |
+| Transformation OpenFE (382 features, 307k lignes) | 8 threads | — | **~3 s** en mémoire (le coût du notebook venait de l'écriture CSV) |
 
 VM de déploiement (inférence seule, sans build) : **2 vCPU / 2-4 Go / 3 Go SSD**
 (3 process : serveur de scoring + app Gradio + SQLite ; ports 5001 et 7860 à

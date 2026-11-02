@@ -1,6 +1,6 @@
 """Construit et enregistre le modele de SERVING (pyfunc) : encodeur + LightGBM tuned + seuil metier.
-A executer APRES la section 12 (Registry v3 disponible).
-Sortie : registry `home-credit-serving` v1 — servi via `mlflow models serve` ou image Docker.
+A executer APRES la section 12 (modele tuned enregistre dans `home-credit-lightgbm`).
+Sortie : nouvelle version du registry `home-credit-serving` — servie via `mlflow models serve`.
 """
 from pathlib import Path
 
@@ -16,7 +16,7 @@ mlflow.set_tracking_uri("http://127.0.0.1:5000")
 mlflow.set_experiment("home-credit-scoring")
 client = mlflow.MlflowClient()
 
-# --- 1. chargement du jeu servi (61 features Boruta, RAW — catégorielles non encodées) ---
+# --- 1. chargement du jeu servi (features Boruta, RAW — catégorielles non encodées) ---
 train = pd.read_csv(PROCESSED / "train_fs.csv")
 y_tr = train["TARGET"]
 X_tr = train.drop(columns=["TARGET"])
@@ -49,8 +49,9 @@ print(f"seuil métier figé : {thr:.4f}")
 
 # --- 5. wrapper pyfunc : RAW -> encode -> proba -> decision ---
 class HomeCreditScorer(mlflow.pyfunc.PythonModel):
-    """API de scoring : entrées = 61 features brutes (telles que train_fs.csv sans TARGET).
-    Sorties : prob_default (P(défaut)), decision (1 = refuser, seuil métier figé)."""
+    """API de scoring : entrées = features Boruta brutes (telles que train_fs.csv sans TARGET).
+    Sorties : prob_default (score pondéré class_weight='balanced', non calibré),
+    decision (1 = refuser, seuil métier figé optimisé sur ce score)."""
 
     def __init__(self, encoder, model, feature_names, threshold):
         self.encoder = encoder
@@ -88,7 +89,7 @@ signature = mlflow.models.infer_signature(
 )
 
 with mlflow.start_run(run_name="build_serving_model") as run:
-    mlflow.pyfunc.log_model(
+    info = mlflow.pyfunc.log_model(
         name="home_credit_scorer",
         python_model=HomeCreditScorer(enc, lgb_tuned, feature_names, thr),
         signature=signature,
@@ -105,5 +106,6 @@ with mlflow.start_run(run_name="build_serving_model") as run:
     mlflow.set_tags({"stage": "serving", "api": "pyfunc_scoring"})
     print(f"Run build_serving_model : {run.info.run_id}")
 
-print("Registry : home-credit-serving v1 prêt")
-print("Lancer : mlflow models serve -m 'models:/home-credit-serving/1' -p 5001 --env-manager local")
+print(f"Registry : home-credit-serving v{info.registered_model_version} prêt")
+print(f"Lancer : mlflow models serve -m 'models:/home-credit-serving/{info.registered_model_version}' "
+      "-p 5001 --env-manager local")

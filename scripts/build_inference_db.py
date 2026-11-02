@@ -2,20 +2,23 @@
 
 Rejoue la chaîne exacte du notebook sur application_test.csv (48 744 clients
 jamais observés à l'entraînement) :
+  0. agrégats des 6 tables secondaires (section 5bis) : jointure gauche sur SK_ID_CURR
+     (cache data/processed/secondary_aggregates.parquet, module secondary_tables.py)
   1. bundle de préparation (section 6) : sentinelle, unités, clip, imputation
   2. banc OpenFE (section 10) : régénéré avec les mêmes graines puis mis en cache
-  3. sélection Boruta (section 11) : les 61 features confirmées
+  3. sélection Boruta (section 11) : les features confirmées
 
 Vérifications intégrées (échec => abort, jamais de base empoisonnée) :
   a) la réplication de la préparation est comparée à train/val_prepared.csv
   b) le banc OpenFE régénéré est comparé à train_fe.csv / val_fe.csv
 
-Sortie : data/inference/clients.db (table `clients` : SK_ID_CURR + 61 features).
+Sortie : data/inference/clients.db (table `clients` : SK_ID_CURR + features Boruta).
 
 Usage :
   .venv/bin/python scripts/build_inference_db.py               # build complet
   .venv/bin/python scripts/build_inference_db.py --skip-verify # sans comparaison
   .venv/bin/python scripts/build_inference_db.py --refresh-bank
+  .venv/bin/python scripts/build_inference_db.py --refresh-agg   # recalcule les agrégats
 """
 import argparse
 import json
@@ -33,12 +36,15 @@ import lightgbm as lgb
 from openfe import OpenFE, get_candidate_features
 from openfe.utils import tree_to_formula
 
+import secondary_tables as st  # même dossier : agrégats partagés avec le notebook
+
 ROOT = Path(__file__).resolve().parents[1]
 RAW = ROOT / "data" / "raw"
 PROCESSED = ROOT / "data" / "processed"
 INFERENCE = ROOT / "data" / "inference"
 BANK_PATH = PROCESSED / "openfe_bank.joblib"
 BANK_FORMULAS_PATH = PROCESSED / "openfe_bank_formulas.json"
+AGG_PATH = PROCESSED / "secondary_aggregates.parquet"
 DB_PATH = INFERENCE / "clients.db"
 
 # graines / hyperparamètres — identiques au notebook (sections 10.1 / 10.2)
@@ -132,6 +138,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--skip-verify", action="store_true", help="sans comparaison aux snapshots")
     parser.add_argument("--refresh-bank", action="store_true", help="regénère le banc OpenFE (cache)")
+    parser.add_argument("--refresh-agg", action="store_true", help="recalcule les agrégats secondaires")
     args = parser.parse_args()
 
     t_start = time.perf_counter()
@@ -150,6 +157,13 @@ def main() -> None:
     y_full = app_train["TARGET"]
     app_test = pd.read_csv(RAW / "application_test.csv")
     test_ids = app_test["SK_ID_CURR"].copy()
+
+    # ------------------------------- 0) agregats des tables secondaires (5bis)
+    print("\n=== 0) agregats des tables secondaires (section 5bis) ===")
+    agg = st.load_or_build(RAW, AGG_PATH, refresh=args.refresh_agg)
+    app_train = st.join_aggregates(app_train, agg)
+    app_test = st.join_aggregates(app_test, agg)
+    print(f"  {agg.shape[1]} agregats joints | train {app_train.shape} | test {app_test.shape}")
 
     # ------------------------------------- 1) replication de la preparation (6)
     print("\n=== 1) preparation (bundle section 6) ===")
@@ -198,7 +212,7 @@ def main() -> None:
         print("  banc OpenFE reproduit a l'identique -> base fiable")
 
     # ------------------------------------- 4) features des clients de test
-    print("\n=== 4) features des 48 744 clients de test ===")
+    print(f"\n=== 4) features des {len(test_base):,} clients de test ===")
     t0 = time.perf_counter()
     ofe = fresh_ofe()
     _, X_test_fe = ofe.transform(X_tr.copy(), test_base.copy(), new_features, n_jobs=N_JOBS)

@@ -47,8 +47,9 @@ matrice de corrélation ciblée.
 
 - Pas de colonne temporelle dans `application_train` (le split devra être aléatoire stratifié —
   risque de recouvrement temporel documenté en section 6).
-- Les 9 tables secondaires (bureau, previous applications, installments…) ne sont **pas** intégrées
-  dans ce pipeline : l'EDA se concentre sur `application_train/test`.
+- Cette EDA porte sur `application_train/test`. Les **6 tables secondaires** (bureau,
+  previous_application, installments…) sont explorées, agrégées et jointes en section 5bis :
+  voir [01b — Tables secondaires](01b_tables_secondaires.md).
 
 ## Coût de calcul
 

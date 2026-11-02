@@ -4,7 +4,7 @@ Notebook : `p6_ml.ipynb`, section 11.
 
 ## Objectif
 
-Le jeu enrichi par OpenFE compte **400 features** dont une partie est :
+Le jeu enrichi par OpenFE compte **603 features** (221 + 382 OpenFE) dont une partie est :
 - **sans variance** (constantes ou quasi-constantes issues des opérateurs) ;
 - **à impact nul** (pas meilleures que du bruit pour prédire le défaut) ;
 - **redondantes** (doublons de ratios déjà couverts).
@@ -21,9 +21,9 @@ cardinalité (nos colonnes catégorielles ordinal-encodées).
 ### Principe du test
 
 1. À chaque trial, chaque feature réelle est **comparée à ses shadow features** — des copies
-   dont les valeurs sont mélangées (permutation) : 400 features réelles + 400 shadows de même
+   dont les valeurs sont mélangées (permutation) : *n* features réelles + *n* shadows de même
    distribution/cardinalité.
-2. Un LightGBM (200 arbres) est entraîné sur les 800 colonnes (split 70/30 interne,
+2. Un LightGBM (200 arbres) est entraîné sur réelles + shadows (split 70/30 interne,
    `train_or_test='test'` : l'importance est évaluée sur des lignes non vues par le fit).
 3. Importance = **|SHAP| moyen** (TreeExplainer, `tree_path_dependent`, `approximate=True`),
    normalisé en z-score.
@@ -54,14 +54,14 @@ Ces colonnes n'ont aucune variance exploitable et pollueraient inutilement le bu
 | Échantillon de recherche | **30 000 lignes** stratifiées (vs 246 008) |
 | Trials | **25** (au-delà, le taux de hits se stabilise) |
 | Modèle par trial | LightGBM 200 arbres, `n_jobs=8` (½ des threads) |
-| Mesure d'importance | **shap** (calibré : ~41 s/trial à 30k lignes → ~17 min) |
+| Mesure d'importance | **shap** (mesuré : ~11 s/trial à 30k lignes → ~5 min) |
 | Compatibilité | shims `scipy≥1.12` (`binom_test`) et `numpy≥2.0` (`np.NaN`) — BorutaShap 1.0.17 est antérieur à ces ruptures |
 
 ## Application
 
 - Encodage ordinal des 16 catégorielles **avant** Boruta (SHAP requiert du numérique) ;
   les noms de colonnes d'origine sont conservés pour l'interprétabilité de la sélection.
-- `BorutaShap(model=LGBM(200), importance_measure='shap', percentile=100, pvalue=0.05)`,
+- `BorutaShap(model=LGBM(200), importance_measure='shap', percentile=50, pvalue=0.05)`,
   `fit(n_trials=25, random_state=42)`.
 - Artefacts : `data/processed/feature_selection_boruta.csv` (décision par feature) ;
   run MLflow `feature_selection_boruta`.
@@ -69,13 +69,13 @@ Ces colonnes n'ont aucune variance exploitable et pollueraient inutilement le bu
 
 ### Application retenu (protocole détendu)
 
-La barre du max-shadow est abaissée via **`percentile=50`** : 200 shadow features pour 400 réelles
-(au lieu de 400). Ce réglage est documenté et justifié par le diagnostic du protocole strict
+La barre du max-shadow est abaissée via **`percentile=50`** (shadows à la moitié des réelles). Ce réglage est documenté et justifié par le diagnostic du protocole strict
 (ci-dessous). Les autres paramètres sont inchangés (`pvalue=0.05`, 25 trials, 30k lignes, 200 arbres).
 
 ### Résultats
 
-> **Protocole strict (`percentile=100`, mesuré)** :
+> **Protocole strict (`percentile=100`) — diagnostic établi sur la version précédente du pipeline
+> (table principale seule, 400 features)** :
 > - Filtre variance : **0 constante / 0 quasi-constante** — OpenFE ne produit que des combinaisons
 >   de features vivantes ; le cas « sans variance » se traitait mais était vide sur ce jeu.
 > - BorutaShap strict : **10 confirmées / 390 rejetées**, dont `EXT_SOURCE_1/2/3`, `DAYS_BIRTH`,
@@ -92,27 +92,29 @@ La barre du max-shadow est abaissée via **`percentile=50`** : 200 shadow featur
 >    conditionnellement au modèle*. Boruta conserve les représentants et rejette les individus
 >    redondants : comportement attendu du protocole, mais excessif ici.
 
-**Résultats du protocole détendu (`percentile=50`, mesuré)** :
-- **61 features confirmées** / 339 rejetées (dont 73 « tentative » tranchées par `TentativeRoughFix`)
-- Top confirmées (ordre de sélection Boruta) : `autoFE_f_91`, `autoFE_f_83`, `CODE_GENDER`,
-  `autoFE_f_55`, `AMT_CREDIT`, `autoFE_f_4`…
-- Modèle LightGBM sur les 61 features (run `feature_selection_boruta`) :
-  ROC-AUC **0,7647**, PR-AUC 0,2568, seuil 0,0978, **coût/client 0,5229**
+**Résultats du protocole détendu (`percentile=50`, mesuré — version actuelle)** :
+- Filtre variance : 0 constante / 0 quasi-constante sur 603 features.
+- **122 features confirmées** / 481 rejetées. Les agrégats secondaires y sont bien représentés
+  (`INST_DBD_MEAN`, `INST_COUNT`, `BUR_ACTIVE_COUNT`, `BUR_DAYS_CREDIT_MEAN`,
+  `CC_UTILIZATION_MEAN/MAX`, `PREV_APR_DAYS_DECISION_MAX`…).
+- Modèle LightGBM pondéré sur les 122 features (run `feature_selection_boruta`) :
+  ROC-AUC **0,7866**, PR-AUC 0,2844, seuil 0,4881, **coût/client 0,4962**
 
-### Mise en perspective (toutes étapes)
+### Mise en perspective (toutes étapes, version actuelle)
 
 | Modèle | Features | ROC-AUC | Coût/client |
 |---|---|---|---|
-| Baseline LogReg | 110 (OHE) | 0,7485 | 0,5414 |
-| Baseline LightGBM | 110 | 0,7585 | 0,5269 |
-| + OpenFE | 400 | 0,7656 | **0,5187** |
-| + Boruta strict (10 feat.) | 10 | 0,7562 | 0,5307 ❌ |
-| **+ Boruta détendu** | **61** | **0,7647** | **0,5229** |
+| Baseline LogReg | 221 (OHE) | 0,7761 | 0,5033 |
+| Baseline LightGBM | 221 | 0,7880 | 0,4873 |
+| + OpenFE | 603 | 0,7895 | **0,4861** |
+| **+ Boruta détendu** | **122** | **0,7866** | 0,4962 |
+| + tuning Optuna (doc 06) | 122 | 0,7893 | **0,4814** |
 
-→ La sélection détendue **conserve 99,9 % de l'AUC** des 400 features avec **85 % de features en
-moins**, et **battent toujours la baseline 110 features** (coût 0,5229 < 0,5269). Compromis
-compactcité/performance nettement favorable — arbitrage final (400 vs 61 pour le tuning) tranché
-en section 6 du doc tuning.
+→ La sélection conserve **99,6 % de l'AUC** avec **80 % de features en moins**, mais coûte
+**+0,010/client** sur ce holdout (contre +0,004 dans la version précédente). Le choix des 122
+features est maintenu pour l'exploitabilité (inférence, SHAP dans l'app, surface de dérive) ;
+l'écart est rattrapé par le tuning (0,4814, meilleur résultat du pipeline). Tuner directement
+les 603 features reste une piste.
 
 ## Limites
 
@@ -126,5 +128,5 @@ en section 6 du doc tuning.
 
 ## Coût de calcul
 
-Filtre variance : ~30 s. BorutaShap : **~17-20 min**, 8 threads, pic ~3,7 Go RAM (mesuré).
+Filtre variance : ~10 s. BorutaShap : **~5 min** (287 s), 8 threads, pic ~4 Go RAM (mesuré).
 Validation finale du sous-ensemble : ~30 s.

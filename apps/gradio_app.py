@@ -19,6 +19,7 @@ Lancement :
 Prérequis : serveur MLflow (:5000) + `mlflow models serve` (:5001) actifs.
 """
 import json
+import os
 import random
 import sqlite3
 import sys
@@ -43,7 +44,8 @@ FORMULAS_PATH = ROOT / "data" / "processed" / "openfe_bank_formulas.json"
 
 TRACKING_URI = "http://127.0.0.1:5000"
 SERVING_URI = "http://127.0.0.1:5001/invocations"
-SERVING_MODEL_URI = "models:/home-credit-serving/1"
+# dernière version du wrapper de serving (surcharge possible : SERVING_MODEL_URI=models:/home-credit-serving/<v>)
+SERVING_MODEL_URI = os.environ.get("SERVING_MODEL_URI", "models:/home-credit-serving/latest")
 PAGE_SIZE = 12
 
 # --------------------------------------------------------------- chargements
@@ -64,7 +66,7 @@ try:
 except Exception as exc:
     raise SystemExit(
         f"Modèle de serving indisponible ({SERVING_MODEL_URI}) : {exc}\n"
-        "Lancer d'abord : mlflow models serve -m 'models:/home-credit-serving/1' "
+        f"Lancer d'abord : mlflow models serve -m '{SERVING_MODEL_URI}' "
         "-p 5001 --env-manager local"
     )
 def _unwrap_python_model(scorer):
@@ -93,8 +95,12 @@ try:
 except Exception:
     _FORMULAS = []
 
-DISPLAY_COLS = ["SK_ID_CURR", "CODE_GENDER", "AMT_CREDIT",
-                "OCCUPATION_TYPE", "HOUR_APPR_PROCESS_START"]
+# colonnes d'aperçu : variables lisibles présentes dans la sélection Boruta (qui varie selon le run)
+_PREFERRED = ["CODE_GENDER", "AMT_CREDIT", "AMT_INCOME_TOTAL", "AMT_ANNUITY", "DAYS_BIRTH",
+              "OCCUPATION_TYPE", "NAME_EDUCATION_TYPE", "EXT_SOURCE_3"]
+_readable = [c for c in _PREFERRED if c in FEATURES]
+_readable += [c for c in FEATURES if not c.startswith("autoFE_f_") and c not in _readable]
+DISPLAY_COLS = ["SK_ID_CURR"] + _readable[:4]
 _page_cache: list[int] = []  # SK_ID_CURR de la page courante
 
 
@@ -171,13 +177,13 @@ def predict(client: dict | None):
     prob, decision = float(pred["prob_default"]), int(pred["decision"])
 
     if decision == 1:
-        decision_txt = "REFUSER la demande (probabilité ≥ seuil)"
+        decision_txt = "REFUSER la demande (score ≥ seuil)"
         cost_txt = ("Si ce client remboursait : coût **1** (FP — marge perdue). "
                     "Sans refus, le défaut attendu coûterait 10 : le refus est l'option la moins chère.")
     else:
-        decision_txt = "ACCEPTER la demande (probabilité < seuil)"
+        decision_txt = "ACCEPTER la demande (score < seuil)"
         cost_txt = ("Si ce client faisait défaut : coût **10** (FN). "
-                    f"La probabilité estimée ({prob:.1%}) reste sous le seuil {_THRESHOLD:.1%} : "
+                    f"Le score ({prob:.1%}) reste sous le seuil {_THRESHOLD:.1%} : "
                     "risque jugé inférieur au gain.")
 
     try:
@@ -227,8 +233,9 @@ def explain(client: dict | None):
     lines += [fmt(i) for i in top_dn] or ["- aucun"]
     proba_final = 1 / (1 + np.exp(-(expl[0].base_values + values.sum())))
     lines.append(f"\nDécision servie : **{'REFUSER' if proba_final >= _THRESHOLD else 'ACCEPTER'}** "
-                 f"(probabilité reconstituée {proba_final:.2%}) au seuil figé {_THRESHOLD:.2%} "
-                 "(seuil bayésien théorique FN=10×FP : 1/11 ≈ 9,1 %).")
+                 f"(score reconstitué {proba_final:.2%}) au seuil figé {_THRESHOLD:.2%}. "
+                 "Modèle entraîné avec `class_weight='balanced'` : le score est pondéré (non calibré, "
+                 "décalé vers le haut) — le seuil métier, optimisé sur ce score, en tient compte.")
     return fig, "\n".join(lines)
 
 
@@ -258,7 +265,7 @@ with gr.Blocks(title="Home Credit — Scoring crédit (inférence MLflow") as de
             client_card = gr.Markdown("*Aucun client sélectionné*")
             predict_btn = gr.Button("🔮 Prédire (via serving MLflow)", variant="primary")
             with gr.Row():
-                prob_out = gr.Textbox(label="P(défaut)", scale=1)
+                prob_out = gr.Textbox(label="Score de risque (pondéré)", scale=1)
                 decision_out = gr.Textbox(label="Décision au seuil métier", scale=2)
             cost_out = gr.Textbox(label="Lecture métier (coût FN = 10 × FP)")
             trace_out = gr.Textbox(label="Inférence tracée (MLflow Prod Inference)")

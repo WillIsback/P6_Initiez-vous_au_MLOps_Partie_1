@@ -5,7 +5,9 @@ Notebook : `p6_ml.ipynb`, section 6.
 ## Objectif
 
 Produire un jeu de features **propre, sans fuite, réutilisable** (snapshots sur disque) servant
-de base aux baselines, au feature engineering et à la feature selection.
+de base aux baselines, au feature engineering et à la feature selection. L'entrée est
+`application_train` **enrichie des 111 agrégats des tables secondaires** (233 colonnes, cf.
+[01b](01b_tables_secondaires.md)).
 
 ## Choix méthodologiques & application
 
@@ -41,8 +43,12 @@ de base aux baselines, au feature engineering et à la feature selection.
 
 ## Résultats
 
-- **110 features** finales (122 → 111 après identifiant → 110 après quasi-constantes),
+- **221 features** finales (233 colonnes − `TARGET` − `SK_ID_CURR` − 10 quasi-constantes `FLAG_*`),
   **0 NaN**, 246 008 / 61 503 lignes.
+- **45 colonnes winsorisées** (dont la majorité des montants et retards agrégés : `BUR_AMT_*`,
+  `INST_DPD_*`…) ; imputation : 205 numériques (médiane) + 16 catégorielles (mode).
+- Les `*_COUNT` des tables secondaires valent déjà 0 sans historique : seuls les autres agrégats
+  sont imputés.
 - Artefacts écrits : `data/processed/train_prepared.csv`, `val_prepared.csv`,
   `preprocessing_bundle.joblib` (transformers réutilisables, refit impossibles — pas de fuite).
 
@@ -56,4 +62,4 @@ de base aux baselines, au feature engineering et à la feature selection.
 
 ## Coût de calcul
 
-~1-2 min, 1 thread, pic ~2,5 Go RAM (écriture des snapshots ~230 Mo).
+~1 min, 1 thread, pic ~4 Go RAM (écriture des snapshots ~510 Mo).
