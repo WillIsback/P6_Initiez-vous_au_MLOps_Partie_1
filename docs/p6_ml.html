@@ -9677,6 +9677,8 @@ agrégats avec |corr| &gt; 0,05 : 24 / 111
 <div class="cm-editor cm-s-jupyter">
 <div class="highlight hl-ipython3"><pre><span></span><span class="c1">### 6.1 — le jeu de test est mis de côté</span>
 <span class="c1"># Il ne resservira qu'à la toute fin, transformé avec les objets fit sur le train.</span>
+<span class="c1"># ⚠️ app_train n'est plus le CSV brut : depuis 5bis.2, il contient application_train.csv</span>
+<span class="c1">#    + les 111 agrégats des 6 tables secondaires (122 -&gt; 233 colonnes). Idem pour app_test.</span>
 <span class="n">df</span> <span class="o">=</span> <span class="n">app_train</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
 <span class="n">X_test_raw</span> <span class="o">=</span> <span class="n">app_test</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
 
@@ -9953,6 +9955,12 @@ exemples de médianes imputées :
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="cm-editor cm-s-jupyter">
 <div class="highlight hl-ipython3"><pre><span></span><span class="c1">### 6.6 — snapshot et bundle de preprocessing (pour le test, puis la prod)</span>
+<span class="c1"># train_prepared.csv / val_prepared.csv = application_train + agrégats des tables secondaires</span>
+<span class="c1"># (jointure 5bis.2), après conversion DAYS, winsorisation, suppression et imputation.</span>
+<span class="c1"># C'est la source unique des sections suivantes : modèles 8-9, OpenFE (-&gt; train_fe.csv),</span>
+<span class="c1"># Boruta (-&gt; train_fs.csv), tuning 12. Contrôle de provenance : cellule 6.6bis.</span>
+<span class="c1"># Le bundle ne contient que le preprocessing ; l'agrégation des tables secondaires est</span>
+<span class="c1"># rejouée à l'inférence par scripts/secondary_tables.py (même code qu'en 5bis.2).</span>
 <span class="kn">import</span><span class="w"> </span><span class="nn">joblib</span>
 
 <span class="n">prep_train</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">concat</span><span class="p">([</span><span class="n">X_tr</span><span class="p">,</span> <span class="n">y_tr</span><span class="p">],</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
@@ -10001,6 +10009,59 @@ shape final — train : (246008, 221) | validation : (61503, 221)
 </div>
 </div>
 </div>
+</div><div class="jp-Cell jp-CodeCell jp-Notebook-cell" id="cell-id=provenance-check">
+<div class="jp-Cell-inputWrapper" tabindex="0">
+<div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
+</div>
+<div class="jp-InputArea jp-Cell-inputArea">
+<div class="jp-InputPrompt jp-InputArea-prompt">In [ ]:</div>
+<div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
+<div class="cm-editor cm-s-jupyter">
+<div class="highlight hl-ipython3"><pre><span></span><span class="c1">### 6.6bis — contrôle de provenance : les fichiers préparés contiennent bien les tables secondaires</span>
+<span class="n">SOURCES</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s1">'BUR_'</span><span class="p">:</span> <span class="s1">'bureau + bureau_balance'</span><span class="p">,</span>
+    <span class="s1">'PREV_'</span><span class="p">:</span> <span class="s1">'previous_application'</span><span class="p">,</span>
+    <span class="s1">'INST_'</span><span class="p">:</span> <span class="s1">'installments_payments'</span><span class="p">,</span>
+    <span class="s1">'POS_'</span><span class="p">:</span> <span class="s1">'POS_CASH_balance'</span><span class="p">,</span>
+    <span class="s1">'CC_'</span><span class="p">:</span> <span class="s1">'credit_card_balance'</span><span class="p">,</span>
+<span class="p">}</span>
+<span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="p">(</span><span class="s1">'train_prepared.csv'</span><span class="p">,</span> <span class="s1">'val_prepared.csv'</span><span class="p">):</span>
+    <span class="n">cols</span> <span class="o">=</span> <span class="p">[</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">PROCESSED_DIR</span> <span class="o">/</span> <span class="n">name</span><span class="p">,</span> <span class="n">nrows</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">columns</span> <span class="k">if</span> <span class="n">c</span> <span class="o">!=</span> <span class="s1">'TARGET'</span><span class="p">]</span>
+    <span class="n">counts</span> <span class="o">=</span> <span class="p">{</span><span class="n">src</span><span class="p">:</span> <span class="nb">sum</span><span class="p">(</span><span class="n">c</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="n">p</span><span class="p">)</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">cols</span><span class="p">)</span> <span class="k">for</span> <span class="n">p</span><span class="p">,</span> <span class="n">src</span> <span class="ow">in</span> <span class="n">SOURCES</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
+    <span class="n">n_sec</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="n">counts</span><span class="o">.</span><span class="n">values</span><span class="p">())</span>
+    <span class="k">assert</span> <span class="n">n_sec</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">,</span> <span class="sa">f</span><span class="s1">'</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s1"> ne contient aucun agrégat des tables secondaires'</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">'</span><span class="si">{</span><span class="n">name</span><span class="si">:</span><span class="s1">18s</span><span class="si">}</span><span class="s1"> : </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">cols</span><span class="p">)</span><span class="si">}</span><span class="s1"> features = </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">cols</span><span class="p">)</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">n_sec</span><span class="si">}</span><span class="s1"> issues de application_train'</span>
+          <span class="sa">f</span><span class="s1">' + </span><span class="si">{</span><span class="n">n_sec</span><span class="si">}</span><span class="s1"> agrégats des tables secondaires'</span><span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s1">'</span><span class="se">\n</span><span class="s1">détail par table source :'</span><span class="p">)</span>
+<span class="k">for</span> <span class="n">src</span><span class="p">,</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">counts</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">'  </span><span class="si">{</span><span class="n">src</span><span class="si">:</span><span class="s1">26s</span><span class="si">}</span><span class="s1"> </span><span class="si">{</span><span class="n">n</span><span class="si">:</span><span class="s1">&gt;3</span><span class="si">}</span><span class="s1">'</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+</div>
+<div class="jp-Cell-outputWrapper">
+<div class="jp-Collapser jp-OutputCollapser jp-Cell-outputCollapser">
+</div>
+<div class="jp-OutputArea jp-Cell-outputArea">
+<div class="jp-OutputArea-child">
+<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
+<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
+<pre>train_prepared.csv : 221 features = 110 issues de application_train + 111 agrégats des tables secondaires
+val_prepared.csv   : 221 features = 110 issues de application_train + 111 agrégats des tables secondaires
+
+détail par table source :
+  bureau + bureau_balance     37
+  previous_application        29
+  installments_payments       21
+  POS_CASH_balance            11
+  credit_card_balance         13
+</pre>
+</div>
+</div>
+</div>
+</div>
 </div>
 <div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=31ea00ec">
 <div class="jp-Cell-inputWrapper" tabindex="0">
@@ -10009,6 +10070,7 @@ shape final — train : (246008, 221) | validation : (61503, 221)
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
 <h3 id="6.7-%E2%80%94-bilan-de-la-pr%C3%A9paration">6.7 — bilan de la préparation<a class="anchor-link" href="#6.7-%E2%80%94-bilan-de-la-pr%C3%A9paration">¶</a></h3><ul>
+<li><strong>Provenance</strong> : <code>train_prepared.csv</code> / <code>val_prepared.csv</code> = <code>application_train</code> <strong>+ agrégats des 6 tables secondaires</strong> (110 + 111 features, contrôle 6.6bis). Toutes les sections suivantes (modèles, OpenFE, Boruta, tuning) partent de ces fichiers.</li>
 <li><strong>Test mis de côté</strong> : <code>app_test</code> n'a servi à aucun calcul ; il sera transformé avec <code>preprocessing_bundle.joblib</code>.</li>
 <li><strong>Anomalies temporelles</strong> : sentinelle <code>DAYS_EMPLOYED = 365243</code> → NaN ; les <code>DAYS_*</code> sont passés de jours négatifs à <strong>années positives</strong>.</li>
 <li><strong>Outliers</strong> : winsorisation (quantiles 0,5 % / 99,5 % du train) de <strong>45 colonnes</strong> continues très asymétriques (<code>AMT_INCOME_TOTAL</code>, <code>AMT_REQ_CREDIT_BUREAU_*</code>, et de nombreux agrégats secondaires : montants <code>BUR_AMT_*</code>, retards <code>INST_DPD_*</code>…).</li>
